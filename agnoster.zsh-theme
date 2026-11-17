@@ -1,173 +1,161 @@
-# vim:ft=zsh ts=2 sw=2 sts=2
-#
-# agnoster's Theme - https://gist.github.com/3712874
-# A Powerline-inspired theme for ZSH
-#
-# # README
-#
-# In order for this theme to render correctly, you will need a
-# [Powerline-patched font](https://gist.github.com/1595572).
-#
-# In addition, I recommend the
-# [Solarized theme](https://github.com/altercation/solarized/) and, if you're
-# using it on Mac OS X, [iTerm 2](http://www.iterm2.com/) over Terminal.app -
-# it has significantly better color fidelity.
-#
-# # Goals
-#
-# The aim of this theme is to only show you *relevant* information. Like most
-# prompts, it will only show git information when in a git working directory.
-# However, it goes a step further: everything from the current user and
-# hostname to whether the last call exited with an error to whether background
-# jobs are running in this shell will all be displayed automatically when
-# appropriate.
-
-### Segments of the prompt, default order declaration
-
-typeset -aHg AGNOSTER_PROMPT_SEGMENTS=(
-    prompt_status
-    prompt_context
-    prompt_virtualenv
-    prompt_dir
-    prompt_git
-    prompt_end
-)
-
-### Segment drawing
-# A few utility functions to make it easy and re-usable to draw segmented prompts
+################################################################################
+########################### GLOBAL CONFIG VARIABLES ############################
+################################################################################
 
 CURRENT_BG='NONE'
-if [[ -z "$PRIMARY_FG" ]]; then
-	PRIMARY_FG=black
-fi
+CURRENT_FG='black'
 
-# Characters
-SEGMENT_SEPARATOR="\ue0b0"
-PLUSMINUS="\u00b1"
-BRANCH="\ue0a0"
-DETACHED="\u27a6"
-CROSS="\u2718"
-LIGHTNING="\u26a1"
-GEAR="\u2699"
+################################################################################
+############################## UTILITY FUNCTIONS ###############################
+################################################################################
 
-# Begin a segment
-# Takes two arguments, background and foreground. Both can be omitted,
-# rendering default background/foreground.
+# - initialization function
+#
+# SEGMENT_SEPARATOR requires powerline-fonts
+() {
+  local LC_ALL="" LC_CTYPE="en_US.UTF-8"
+  SEGMENT_SEPARATOR=$'\ue0b0'
+}
+
+# prompt_segment - renders prompt segment
+#   ${1} : [optional] background color (keyword / rgb hex)
+#   ${2} : [optional] foreground color (keyword / rgb hex)
+#   ${3} : [optional] displayed text
+#
+# Example:
+#   prompt_segment 'red' '#fafafa' `pwd`
 prompt_segment() {
   local bg fg
   [[ -n $1 ]] && bg="%K{$1}" || bg="%k"
   [[ -n $2 ]] && fg="%F{$2}" || fg="%f"
   if [[ $CURRENT_BG != 'NONE' && $1 != $CURRENT_BG ]]; then
-    print -n "%{$bg%F{$CURRENT_BG}%}$SEGMENT_SEPARATOR%{$fg%}"
+    echo -n " %{$bg%F{$CURRENT_BG}%}$SEGMENT_SEPARATOR%{$fg%} "
   else
-    print -n "%{$bg%}%{$fg%}"
+    echo -n "%{$bg%}%{$fg%} "
   fi
   CURRENT_BG=$1
-  [[ -n $3 ]] && print -n $3
+  [[ -n $3 ]] && echo -n $3
 }
 
-# End the prompt, closing any open segments
+################################################################################
+######################## PROMPT SEGMENTS IMPLEMENTATION ########################
+################################################################################
+
+# prompt_end - closes any open segment
 prompt_end() {
   if [[ -n $CURRENT_BG ]]; then
-    print -n "%{%k%F{$CURRENT_BG}%}$SEGMENT_SEPARATOR"
+    echo -n " %{%k%F{$CURRENT_BG}%}$SEGMENT_SEPARATOR"
   else
-    print -n "%{%k%}"
+    echo -n "%{%k%}"
   fi
-  print -n "%{%f%}"
+  echo -n "%{%f%}"
   CURRENT_BG=''
 }
 
 ### Prompt components
 # Each component will draw itself, and hide itself if no information needs to be shown
 
-# Context: user@hostname (who am I and where am I)
+# prompt_context - current user & host
 prompt_context() {
-  local user=`whoami`
-
-  if [[ "$user" != "$DEFAULT_USER" || -n "$SSH_CONNECTION" ]]; then
-    prompt_segment $PRIMARY_FG default " %(!.%{%F{yellow}%}.)$user@%m "
+  if [[ "$USERNAME" != "$DEFAULT_USER" || -n "$SSH_CLIENT" ]]; then
+    prompt_segment black default "%(!.%{%F{yellow}%}.)%n@%m"
   fi
 }
 
-# Git: branch/detached head, dirty status
+# prompt_git - info about branch and dirty status
 prompt_git() {
-  local color ref
-  is_dirty() {
-    test -n "$(git status --porcelain --ignore-submodules)"
+  (( $+commands[git] )) || return
+  if [[ "$(git config --get oh-my-zsh.hide-status 2>/dev/null)" = 1 ]]; then
+    return
+  fi
+  local PL_BRANCH_CHAR
+  () {
+    local LC_ALL="" LC_CTYPE="en_US.UTF-8"
+    PL_BRANCH_CHAR=$'\ue0a0'         # 
   }
-  ref="$vcs_info_msg_0_"
-  if [[ -n "$ref" ]]; then
-    if is_dirty; then
-      color=yellow
-      ref="${ref} $PLUSMINUS"
+  local ref dirty mode repo_path
+
+   if [[ "$(git rev-parse --is-inside-work-tree 2>/dev/null)" = "true" ]]; then
+    repo_path=$(git rev-parse --git-dir 2>/dev/null)
+    dirty=$(parse_git_dirty)
+    ref=$(git symbolic-ref HEAD 2> /dev/null) || ref="➦ $(git rev-parse --short HEAD 2> /dev/null)"
+    if [[ -n $dirty ]]; then
+      prompt_segment yellow black
     else
-      color=green
-      ref="${ref} "
+      prompt_segment green $CURRENT_FG
     fi
-    if [[ "${ref/.../}" == "$ref" ]]; then
-      ref="$BRANCH $ref"
-    else
-      ref="$DETACHED ${ref/.../}"
+
+    if [[ -e "${repo_path}/BISECT_LOG" ]]; then
+      mode=" <B>"
+    elif [[ -e "${repo_path}/MERGE_HEAD" ]]; then
+      mode=" >M<"
+    elif [[ -e "${repo_path}/rebase" || -e "${repo_path}/rebase-apply" || -e "${repo_path}/rebase-merge" || -e "${repo_path}/../.dotest" ]]; then
+      mode=" >R>"
     fi
-    prompt_segment $color $PRIMARY_FG
-    print -n " $ref"
+
+    setopt promptsubst
+    autoload -Uz vcs_info
+
+    zstyle ':vcs_info:*' enable git
+    zstyle ':vcs_info:*' get-revision true
+    zstyle ':vcs_info:*' check-for-changes true
+    zstyle ':vcs_info:*' stagedstr '✚'
+    zstyle ':vcs_info:*' unstagedstr '±'
+    zstyle ':vcs_info:*' formats ' %u%c'
+    zstyle ':vcs_info:*' actionformats ' %u%c'
+    vcs_info
+    echo -n "${ref/refs\/heads\//$PL_BRANCH_CHAR }${vcs_info_msg_0_%% }${mode}"
   fi
 }
 
-# Dir: current working directory
+# prompt_dir - top 2 directories relative to ~ or /
 prompt_dir() {
-  prompt_segment blue $PRIMARY_FG ' %~ '
+  prompt_segment blue $CURRENT_FG '%2~'
 }
 
-# Status:
-# - was there an error
-# - am I root
-# - are there background jobs?
-prompt_status() {
-  local symbols
-  symbols=()
-  [[ $RETVAL -ne 0 ]] && symbols+="%{%F{red}%}$CROSS"
-  [[ $UID -eq 0 ]] && symbols+="%{%F{yellow}%}$LIGHTNING"
-  [[ $(jobs -l | wc -l) -gt 0 ]] && symbols+="%{%F{cyan}%}$GEAR"
-
-  [[ -n "$symbols" ]] && prompt_segment $PRIMARY_FG default " $symbols "
-}
-
-# Display current virtual environment
+# prompt_virtualenv - name of currently active virtualenv
 prompt_virtualenv() {
-  if [[ -n $VIRTUAL_ENV ]]; then
-    color=cyan
-    prompt_segment $color $PRIMARY_FG
-    print -Pn " $(basename $VIRTUAL_ENV) "
+  local virtualenv_path="$VIRTUAL_ENV"
+  if [[ -n $virtualenv_path ]]; then
+    prompt_segment white black "`basename $virtualenv_path`"
   fi
 }
 
-## Main prompt
-prompt_agnoster_main() {
+# prompt_error - retcode of previous command if !0
+prompt_error() {
+  if [[ ${RETVAL} -ne 0 ]]; then
+    prompt_segment red black "${RETVAL}"
+  fi
+}
+
+# prompt_status - info regarding background jobs
+prompt_status() {
+  local -a symbols
+
+  [[ $(jobs -l | wc -l) -gt 0 ]] && symbols+="%{%F{cyan}%}⚙"
+
+  [[ -n "$symbols" ]] && prompt_segment black default "$symbols"
+}
+
+# build_prompt - generate prompt
+build_prompt() {
   RETVAL=$?
-  CURRENT_BG='NONE'
-  for prompt_segment in "${AGNOSTER_PROMPT_SEGMENTS[@]}"; do
-    [[ -n $prompt_segment ]] && $prompt_segment
-  done
+
+  # in case of output not ending in '\n'
+  printf '\n'
+
+  # prompt building
+  prompt_error
+  prompt_status
+  prompt_virtualenv
+  prompt_context
+  prompt_dir
+  prompt_git
+  prompt_end
+
+  # use comm on next line
+  printf '\n  \u21b3'
 }
 
-prompt_agnoster_precmd() {
-  vcs_info
-  PROMPT='%{%f%b%k%}$(prompt_agnoster_main) '
-}
+PROMPT='%{%f%b%k%}$(build_prompt) '
 
-prompt_agnoster_setup() {
-  autoload -Uz add-zsh-hook
-  autoload -Uz vcs_info
-
-  prompt_opts=(cr subst percent)
-
-  add-zsh-hook precmd prompt_agnoster_precmd
-
-  zstyle ':vcs_info:*' enable git
-  zstyle ':vcs_info:*' check-for-changes false
-  zstyle ':vcs_info:git*' formats '%b'
-  zstyle ':vcs_info:git*' actionformats '%b (%a)'
-}
-
-prompt_agnoster_setup "$@"
