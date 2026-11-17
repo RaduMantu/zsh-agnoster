@@ -37,6 +37,11 @@ prompt_segment() {
   [[ -n $3 ]] && echo -n $3
 }
 
+# parse_git_dirty - because we are independent from OMZ
+function parse_git_dirty() {
+  [[ -n "$(git status --porcelain 2>/dev/null)" ]] && echo "*"
+}
+
 ################################################################################
 ######################## PROMPT SEGMENTS IMPLEMENTATION ########################
 ################################################################################
@@ -58,7 +63,7 @@ prompt_end() {
 # prompt_context - current user & host
 prompt_context() {
   if [[ "$USERNAME" != "$DEFAULT_USER" || -n "$SSH_CLIENT" ]]; then
-    prompt_segment black default "%(!.%{%F{yellow}%}.)%n@%m"
+    prompt_segment '#262626' default "%(!.%{%F{yellow}%}.)%n@%m"
   fi
 }
 
